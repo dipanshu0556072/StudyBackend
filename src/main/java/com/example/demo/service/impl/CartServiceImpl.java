@@ -2,15 +2,19 @@ package com.example.demo.service.impl;
 
 import com.example.demo.entity.*;
 import com.example.demo.exception.ProductNotFoundException;
-import com.example.demo.repo.CartRepo;
-import com.example.demo.repo.ProductRepo;
+import com.example.demo.exception.UserAlreadyExistException;
+import com.example.demo.exception.WishListItemException;
+import com.example.demo.repo.*;
 import com.example.demo.service.CartService;
+import com.example.demo.service.WishListItemService;
+import com.example.demo.service.WishListService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,62 +22,154 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Optional;
 
 @Service
+@Transactional
 public class CartServiceImpl implements CartService {
 
     @Autowired
-    private CartRepo cartRepository;
+    private ProductRepo productRepo;
 
     @Autowired
-    private ProductRepo productRepository;
+    private CartRepo cartRepo;
 
-    @Override
-    @Transactional
+    @Autowired
+    private UserRepo userRepo;
+
+    @Autowired
+    private WishListItemRepo wishListItemRepo;
+
+    @Autowired
+    private WishListRepo wishListRepo;
+
+    @Autowired
+    private WishListItemService wishListItemService;
+
+    //add product in the cart
     public Cart addToCart(Long userId, CartItemDto cartItemDto) {
-        // Fetch the product from the database
-        Optional<Product> productOptional = productRepository.findById(cartItemDto.getProductId());
-        if (!productOptional.isPresent()) {
-            throw new RuntimeException("Product not found!");
+
+        //check userId is exist or not
+        if(!userRepo.findById(userId).isPresent()){
+            throw new UserAlreadyExistException("User not found with given id:"+userId);
         }
 
-        Product product = productOptional.get();
+        // Check if the product exists with the given productId
+        Product product = productRepo.findById(cartItemDto.getProductId()).orElseThrow(() -> new ProductNotFoundException("Product not found in database with given id: " + cartItemDto.getProductId()));
 
-//        // Check if product details (size, color) match
-//        if (!product.getSize().equals(cartItemDto.getSize()) || !product.equals(cartItemDto.getColor())) {
-//            throw new RuntimeException("Product details (size, color) do not match!");
-//        }
-//
-//        // Check if sufficient quantity is available
-//        if (product.getQuantity() < cartItemDto.getQuantity()) {
-//            throw new RuntimeException("Insufficient stock!");
-//        }
+        // Check if the product is available with given size, color, and quantity
+        boolean isProductFound = false;
+        for (Size size : product.getSize()) {
+            if (size.getName().equalsIgnoreCase(cartItemDto.getSize()) &&
+                    size.getColor().equalsIgnoreCase(cartItemDto.getColor()) &&
+                    cartItemDto.getQuantity()<= size.getQuantity() ) {
+                isProductFound = true;
+                break;
+            }
+        }
+        if (!isProductFound) {
+            throw new ProductNotFoundException("Product not found in database with given size, color, quantity");
+        }
 
-        // Reduce product stock quantity
-        product.setQuantity(product.getQuantity() - cartItemDto.getQuantity());
-        productRepository.save(product);
+        // Update the stock quantity in the database
+        for (Size size : product.getSize()) {
+            if (size.getName().equalsIgnoreCase(cartItemDto.getSize()) &&
+                    size.getColor().equalsIgnoreCase(cartItemDto.getColor()) &&
+                    size.getQuantity() >= cartItemDto.getQuantity()) {
+                size.setQuantity(size.getQuantity() - cartItemDto.getQuantity());
+                break;
+            }
+        }
+        productRepo.save(product);
 
-        // Create CartItem
-        CartItem cartItem = new CartItem();
-        cartItem.setProductId(product.getId());
-        cartItem.setSize(cartItemDto.getSize());
+        // Store in the cartItem table
+        CartItem cartItem=new CartItem();
+        cartItem.setProductId(cartItemDto.getProductId());
         cartItem.setColor(cartItemDto.getColor());
-        cartItem.setQuantity(cartItemDto.getQuantity());
+        cartItem.setSize(cartItemDto.getSize());
+        cartItem.setProductDiscountedPrice(Double.parseDouble(product.getDiscountedPrice()));
         cartItem.setProductPrice(Double.parseDouble(product.getPrice()));
-        // Calculate discounted price if applicable
-        // cartItem.setProductDiscountedPrice(...);
+        cartItem.setQuantity(cartItemDto.getQuantity());
 
-        // Update Cart
-        Cart cart = cartRepository.findByUserId(userId);
-        if (cart == null) {
-            cart = new Cart();
+        Cart cart=cartRepo.findByUserId(userId);
+        if (cart==null){
+            cart=new Cart();
             cart.setUserId(userId);
+            cart.setCartItems(new ArrayList<>());
         }
+        List<CartItem>cartItems=cart.getCartItems();
+        cartItems.add(cartItem);
 
-        cart.getCartItems().add(cartItem);
-        cart.setTotalCartAmount(cart.getTotalCartAmount() + (cartItem.getProductPrice() * cartItem.getQuantity()));
-        // Update discounted amount and total quantity accordingly
-        // cart.setTotalCartDiscountedAmount(...);
-        // cart.setTotalCartQuantity(...);
+        int totalQuantity = 0;
+        double totalAmount = 0.0;
+        double totalDiscountedAmount = 0.0;
 
-        return cartRepository.save(cart);
+        for (CartItem item : cartItems){
+            totalQuantity+=item.getQuantity();
+            totalAmount+=(item.getProductPrice() * cartItemDto.getQuantity());
+            totalDiscountedAmount+=(item.getProductDiscountedPrice()*cartItemDto.getQuantity());
+        }
+        cart.setTotalCartQuantity(totalQuantity);
+        cart.setTotalCartDiscountedAmount(totalDiscountedAmount);
+        cart.setTotalCartAmount(totalAmount);
+        // Save the cart in the database
+        return cartRepo.save(cart);
     }
+
+
+    //add to cart from wishList
+    @Override
+    public Cart addWishListToCart(Long userId, CartItemDto cartItemDto, Long wishListId){
+        // check the userId exist in the database in the database
+        userRepo.findById(userId).orElseThrow(()->new UserAlreadyExistException("User not found with given id:"+userId));
+
+        //check the product is exist in the database with the given id
+        Product product=productRepo.findById(cartItemDto.getProductId()).orElseThrow(()->new WishListItemException("Product not found in database with given id:"+cartItemDto.getProductId()));
+
+        //now check the cartItemId exist in the CartItem Table or not
+        WishListItem wishListItem=wishListItemRepo.findById(wishListId).orElseThrow(()-> new WishListItemException("cartItemId="+wishListId+" not exist in the database"));
+
+        //now store the cartItem data in the database
+        CartItem cartItem=new CartItem();
+        cartItem.setProductPrice(wishListItem.getProductPrice());
+        cartItem.setProductDiscountedPrice(wishListItem.getProductDiscountedPrice());
+        cartItem.setColor(wishListItem.getColor());
+        cartItem.setSize(wishListItem.getSize());
+        cartItem.setQuantity(wishListItem.getQuantity());
+        cartItem.setProductId(wishListItem.getProductId());
+
+        //now check, is wishlist exist in wishlist table with userId, if yes then restore that and update else create new for that userId
+        Cart cart=cartRepo.findByUserId(userId);
+        if(cart==null){
+            cart=new Cart();
+            cart.setUserId(userId);
+            cart.setCartItems(new ArrayList<>());
+        }
+        List<CartItem>cartItems=cart.getCartItems();
+        cartItems.add(cartItem);
+
+
+        //now calculate the total summary for wishList
+
+        int totalQuantity = 0;
+        double totalAmount = 0.0;
+        double totalDiscountedAmount = 0.0;
+
+        for (CartItem item : cartItems){
+            totalQuantity+=item.getQuantity();
+            totalAmount+=(item.getProductPrice());
+            totalDiscountedAmount+=(item.getProductDiscountedPrice());
+        }
+        cart.setTotalCartQuantity(totalQuantity);
+        cart.setTotalCartDiscountedAmount(totalDiscountedAmount);
+        cart.setTotalCartAmount(totalAmount);
+
+        // now remove the product from the cart
+        wishListItemService.removeWishListItem(userId,wishListId);
+
+        //now save it in the table of Wishlist
+        return cartRepo.save(cart);
+
+    }
+
+
+
 }
+

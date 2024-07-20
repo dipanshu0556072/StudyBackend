@@ -6,16 +6,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Entity
-@Table(name = "carts")
-public class Cart {
+@Table(name="wishList")
+public class WishList
+{
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
-
-    @OneToMany(cascade=CascadeType.ALL)
-    @JoinColumn(name="card_id")
-    private List<CartItem>cartItems=new ArrayList<>();
+    @OneToMany(cascade = CascadeType.ALL)
+    @JoinColumn(name = "wishList_id")
+    private List<WishListItem>wishListItems=new ArrayList<>();
 
     @Column(name = "total_cart_amount")
     private double totalCartAmount = 0.0;
@@ -29,16 +29,24 @@ public class Cart {
     @Column(name = "user_id")
     private Long userId;
 
-    public Cart() {
+
+    //constructor
+
+
+    //getter and setter
+
+
+    public WishList() {
     }
 
-    public Cart(List<CartItem> cartItems, double totalCartAmount, double totalCartDiscountedAmount, int totalCartQuantity, Long userId) {
-        this.cartItems = cartItems;
+    public WishList(List<WishListItem> wishListItems, double totalCartAmount, double totalCartDiscountedAmount, int totalCartQuantity, Long userId) {
+        this.wishListItems = wishListItems;
         this.totalCartAmount = totalCartAmount;
         this.totalCartDiscountedAmount = totalCartDiscountedAmount;
         this.totalCartQuantity = totalCartQuantity;
         this.userId = userId;
     }
+
 
     public Long getId() {
         return id;
@@ -48,12 +56,12 @@ public class Cart {
         this.id = id;
     }
 
-    public List<CartItem> getCartItems() {
-        return cartItems;
+    public List<WishListItem> getWishListItems() {
+        return wishListItems;
     }
 
-    public void setCartItems(List<CartItem> cartItems) {
-        this.cartItems = cartItems;
+    public void setWishListItems(List<WishListItem> wishListItems) {
+        this.wishListItems = wishListItems;
     }
 
     public double getTotalCartAmount() {
